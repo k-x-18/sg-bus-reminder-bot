@@ -29,9 +29,7 @@ Local Setup:
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 LTA_API_KEY=your_lta_datamall_api_key
 DYNAMODB_TABLE_NAME=sg-bus-reminders
-AWS_REGION=us-east-1
-AWS_ACCESS_KEY_ID=your_aws_access_key
-AWS_SECRET_ACCESS_KEY=your_aws_secret_key
+AWS_REGION=ap-southeast-1
 ```
 
 2. **Set up DynamoDB table** (one-time setup):

@@ -3,7 +3,7 @@ import logging
 import re
 import requests
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler, CallbackQueryHandler
@@ -326,19 +326,43 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE):
             if rem.get("days") == "weekdays" and weekday >= 5:
                 continue
 
-            if rem.get("time") == now:
+            rem_time = rem.get("time")
+            if not rem_time:
+                continue
+
+            try:
+                # Convert reminder HH:MM into datetime today
+                rem_dt = datetime.combine(
+                    sg_now.date(),
+                    datetime.strptime(rem_time, "%H:%M").time()
+                )
+            except ValueError:
+                logger.error(f"Invalid time format stored in reminder: {rem_time}")
+                continue
+
+            # Trigger if within 60-second window
+            delta_seconds = (sg_now - rem_dt).total_seconds()
+
+            if 0 <= delta_seconds < 60:
                 bus = rem.get("bus_number")
                 stop = rem.get("bus_stop")
 
                 service = get_bus_arrival(stop, bus)
 
                 if not service:
-                    await context.bot.send_message(chat_id, f"Could not fetch arrival for Bus {bus}")
+                    await context.bot.send_message(
+                        chat_id,
+                        f"Could not fetch arrival for Bus {bus}"
+                    )
                     continue
 
                 msg = format_arrival_message(service, bus)
 
-                await context.bot.send_message(chat_id, msg, parse_mode="Markdown")
+                await context.bot.send_message(
+                    chat_id,
+                    msg,
+                    parse_mode="Markdown"
+                )
 
 
 def validate_bus_stop_input(bus_number: str, user_input: str):

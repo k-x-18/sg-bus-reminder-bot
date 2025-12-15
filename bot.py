@@ -7,6 +7,13 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler, CallbackQueryHandler
+from dynamodb_helper import (
+    ensure_table_exists,
+    get_user_reminders,
+    add_reminder,
+    delete_reminder as delete_reminder_dynamodb,
+    get_all_reminders
+)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -24,7 +31,7 @@ logger = logging.getLogger(__name__)
 # Global caches for performance optimization
 bus_route_cache = {}          # service_no → list of route entries
 all_bus_stops_cache = {}     # stop_code → {code, name, road}
-user_reminders = {}          # chat_id → list of reminders
+# Note: user_reminders is now stored in DynamoDB, not in-memory
 
 #====================================================================API CONFIGURATION============================================================
 LTA_API_URL_BUSROUTES = "https://datamall2.mytransport.sg/ltaodataservice/BusRoutes"
@@ -302,7 +309,18 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE):
     now = sg_now.strftime("%H:%M")
     weekday = sg_now.weekday()  # Monday=0
 
-    for chat_id, reminders in user_reminders.items():
+    # Get all reminders from DynamoDB
+    all_reminders = get_all_reminders()
+    
+    # Group reminders by chat_id for efficient processing
+    reminders_by_chat = {}
+    for rem in all_reminders:
+        chat_id = rem.get("chat_id")
+        if chat_id not in reminders_by_chat:
+            reminders_by_chat[chat_id] = []
+        reminders_by_chat[chat_id].append(rem)
+
+    for chat_id, reminders in reminders_by_chat.items():
         for rem in reminders:
             # Skip weekdays-only reminders on weekends
             if rem.get("days") == "weekdays" and weekday >= 5:
@@ -497,16 +515,22 @@ async def save_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     days = context.user_data.get("selected_days")
 
     chat_id = update.effective_chat.id
-    if chat_id not in user_reminders:
-        user_reminders[chat_id] = []
-
-    user_reminders[chat_id].append({
-        "bus_number": bus,
-        "bus_stop": stop_code,
-        "bus_stop_name": stop_name,
-        "days": days,
-        "time": time_str
-    })
+    
+    # Save reminder to DynamoDB
+    reminder_id = add_reminder(
+        chat_id=chat_id,
+        bus_number=bus,
+        bus_stop=stop_code,
+        bus_stop_name=stop_name,
+        days=days,
+        time=time_str
+    )
+    
+    if not reminder_id:
+        await update.message.reply_text(
+            "Error: Failed to save reminder. Please try again."
+        )
+        return ConversationHandler.END
 
     await update.message.reply_text(
         f"Reminder saved!\n\n"
@@ -527,10 +551,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def list_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
 
-    reminders = user_reminders.get(chat_id, [])
+    reminders = get_user_reminders(chat_id)
 
     if not reminders:
-        await update.message.reply_text("You don’t have any bus reminders set yet!")
+        await update.message.reply_text("You don't have any bus reminders set yet!")
         return
 
     response = "*Your Bus Reminders:*\n\n"
@@ -549,7 +573,7 @@ async def list_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def delete_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Delete a reminder by its number in /list output."""
     chat_id = update.effective_chat.id
-    reminders = user_reminders.get(chat_id, [])
+    reminders = get_user_reminders(chat_id)
 
     if not reminders:
         await update.message.reply_text("You have no reminders to delete.")
@@ -571,21 +595,27 @@ async def delete_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Please provide a number between 1 and {len(reminders)}.")
         return
 
-    removed = reminders.pop(idx - 1)
+    removed = reminders[idx - 1]
+    reminder_id = removed.get("reminder_id")
     stop_code = removed.get("bus_stop")
     stop_name = removed.get("bus_stop_name") or get_bus_stop_name(stop_code) or stop_code
 
-    await update.message.reply_text(
-        f"Deleted reminder #{idx}:\n"
-        f"Bus: {removed.get('bus_number')}\n"
-        f"Stop: {stop_name} ({stop_code})\n"
-        f"Days: {removed.get('days')}\n"
-        f"Time: {removed.get('time')}"
-    )
+    # Validate reminder_id exists
+    if not reminder_id:
+        await update.message.reply_text("Error: Reminder ID not found. Please check reminder listings and try again.")
+        return
 
-    # Clean up empty list to free memory
-    if not reminders:
-        user_reminders.pop(chat_id, None)
+    # Delete from DynamoDB
+    if delete_reminder_dynamodb(reminder_id):
+        await update.message.reply_text(
+            f"Deleted reminder #{idx}:\n"
+            f"Bus: {removed.get('bus_number')}\n"
+            f"Stop: {stop_name} ({stop_code})\n"
+            f"Days: {removed.get('days')}\n"
+            f"Time: {removed.get('time')}"
+        )
+    else:
+        await update.message.reply_text("Error: Failed to delete reminder. Please try again.")
 
 
 def main() -> None:
@@ -597,6 +627,14 @@ def main() -> None:
         logger.error("TELEGRAM_BOT_TOKEN environment variable not set!")
         logger.error("Please set it using: export TELEGRAM_BOT_TOKEN='your_token_here'")
         return
+    
+    # Ensure DynamoDB table exists
+    logger.info("Ensuring DynamoDB table exists...")
+    try:
+        ensure_table_exists()
+    except Exception as e:
+        logger.error(f"Failed to initialize DynamoDB: {e}")
+        logger.error("Bot will continue but reminders may not persist.")
     
     # Load all bus stops into cache at startup
     logger.info("Loading all bus stops into cache at startup...")

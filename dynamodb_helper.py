@@ -66,14 +66,10 @@ def ensure_table_exists():
                             ],
                             'Projection': {
                                 'ProjectionType': 'ALL'
-                            },
-                            'ProvisionedThroughput': {
-                                'ReadCapacityUnits': 5,
-                                'WriteCapacityUnits': 5
                             }
                         }
                     ],
-                    BillingMode='PAY_PER_REQUEST'  # Use on-demand pricing
+                    BillingMode='PAY_PER_REQUEST'
                 )
                 # Wait for table to be created
                 table.wait_until_exists()

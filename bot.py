@@ -285,10 +285,10 @@ def format_arrival_message(service, bus_number):
     next_arrival = minutes_to_arrival(next_bus.get("EstimatedArrival"))
     next2_arrival = minutes_to_arrival(next2_bus.get("EstimatedArrival"))
 
-    msg = f"🚌 *Bus {bus_number} Arrival Info*\\n"
+    msg = f"*Bus {bus_number} Arrival Info*\n"
 
     if next_arrival is None:
-        msg += "No arrival data available.\\n"
+        msg += "No arrival data available.\n"
         return msg
 
     if next_arrival <= 2:
@@ -298,8 +298,8 @@ def format_arrival_message(service, bus_number):
     else:
         urgency = "You have some time."
 
-    msg += f"Next bus: *{next_arrival} min*\\n"
-    msg += f"Second bus: *{next2_arrival} min*\\n\\n"
+    msg += f"Next bus: *{next_arrival} min*\n"
+    msg += f"Second bus: *{next2_arrival} min*\n\n"
     msg += urgency
 
     return msg
@@ -437,7 +437,7 @@ Available commands:
     await update.message.reply_text(help_text)
 
 async def set_bus_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Which bus number? (e.g. 970)")
+    await update.message.reply_text("Please enter the bus number (e.g. 970)")
     return ASK_BUS_NUMBER
 
 async def ask_bus_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):

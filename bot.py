@@ -294,9 +294,9 @@ def format_arrival_message(service, bus_number):
     if next_arrival <= 2:
         urgency = "*RUN! The bus is arriving soon!*"
     elif next_arrival <= 5:
-        urgency = "*Bus is coming shortly*"
+        urgency = "*Bus arriving shortly*"
     else:
-        urgency = "You have some time."
+        urgency = "Plenty of time."
 
     msg += f"Next bus: *{next_arrival} min*\n"
     msg += f"Second bus: *{next2_arrival} min*\n\n"
@@ -509,7 +509,7 @@ async def ask_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     context.user_data["selected_days"] = query.data
-    await query.edit_message_text("What time? (HH:MM)")
+    await query.edit_message_text("Please enter the time in HH:MM format (24-hour)")
 
     return ASK_TIME
 

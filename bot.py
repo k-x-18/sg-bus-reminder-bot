@@ -5,6 +5,7 @@ import requests
 import time
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
+import pytz
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler, CallbackQueryHandler
 from dynamodb_helper import (
@@ -305,7 +306,10 @@ def format_arrival_message(service, bus_number):
 
 
 async def check_reminders(context: ContextTypes.DEFAULT_TYPE):
-    sg_now = datetime.now(timezone.utc).astimezone()  # uses system local TZ; adjust here if needed
+    # Get current time in Singapore timezone (UTC+8)
+    # This ensures correct behavior regardless of EC2 server timezone
+    sg_tz = pytz.timezone("Asia/Singapore")
+    sg_now = datetime.now(sg_tz)
     now = sg_now.strftime("%H:%M")
     weekday = sg_now.weekday()  # Monday=0
 
@@ -331,12 +335,12 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE):
                 continue
 
             try:
-                # Make reminder datetime timezone-aware (same tz as sg_now)
-                rem_dt = datetime.combine(
-                    sg_now.date(),
-                    datetime.strptime(rem_time, "%H:%M").time(),
-                    tzinfo=sg_now.tzinfo
-                )
+                # Make reminder datetime timezone-aware in Singapore timezone
+                # Parse the time string and combine with today's date
+                rem_time_obj = datetime.strptime(rem_time, "%H:%M").time()
+                rem_dt_naive = datetime.combine(sg_now.date(), rem_time_obj)
+                # Localize to Singapore timezone using pytz
+                rem_dt = sg_tz.localize(rem_dt_naive)
             except ValueError:
                 logger.error(f"Invalid time format in reminder: {rem_time}")
                 continue

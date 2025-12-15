@@ -331,18 +331,19 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE):
                 continue
 
             try:
-                # Convert reminder HH:MM into datetime today
+                # Make reminder datetime timezone-aware (same tz as sg_now)
                 rem_dt = datetime.combine(
                     sg_now.date(),
-                    datetime.strptime(rem_time, "%H:%M").time()
+                    datetime.strptime(rem_time, "%H:%M").time(),
+                    tzinfo=sg_now.tzinfo
                 )
             except ValueError:
-                logger.error(f"Invalid time format stored in reminder: {rem_time}")
+                logger.error(f"Invalid time format in reminder: {rem_time}")
                 continue
 
-            # Trigger if within 60-second window
             delta_seconds = (sg_now - rem_dt).total_seconds()
 
+            # Fire if within 60-second window
             if 0 <= delta_seconds < 60:
                 bus = rem.get("bus_number")
                 stop = rem.get("bus_stop")

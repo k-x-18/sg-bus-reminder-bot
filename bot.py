@@ -234,7 +234,7 @@ def get_bus_arrival(stop_code: str, bus_number: str):
         return None
 
 
-#====================================================================CACHE-BASED FUNCTIONS (NO API CALLS)============================================================
+#====================================================================CACHE-BASED FUNCTIONS============================================================
 
 def is_stop_in_bus_route(bus_number: str, stop_code: str) -> bool:
     """Check if a bus stop is in a bus service route using cached routes."""
@@ -246,7 +246,6 @@ def search_bus_stops_by_name(query: str) -> list:
     """
     Performs case-insensitive substring matching on cached bus stops.
     Returns a list of stop dicts.
-    No API calls.
     """
     query = query.lower()
     matches = []
@@ -258,7 +257,7 @@ def search_bus_stops_by_name(query: str) -> list:
     return matches
 
 def get_bus_stop_name(code: str):
-    """Get bus stop name from cache. Returns None if not found. No API calls."""
+    """Get bus stop name from cache. Returns None if not found."""
     stop = all_bus_stops_cache.get(code)
     return stop["name"] if stop else None
 
@@ -374,7 +373,6 @@ def validate_bus_stop_input(bus_number: str, user_input: str):
     """
     Validate bus stop input (code or name).
     Returns: {code, name} if valid, None if invalid, or error message string.
-    No API calls - uses cache only.
     """
     user_input = user_input.strip()
     
@@ -418,8 +416,6 @@ def validate_bus_stop_input(bus_number: str, user_input: str):
 def get_bus_stops_for_service(bus_number: str) -> list:
     """
     Get all unique bus stops for a bus service.
-    Returns a list of dicts with 'code' and 'name' keys, sorted by code.
-    Uses cached route data - no API calls.
     """
     routes = get_bus_routes(bus_number)
     if not routes:
@@ -493,6 +489,7 @@ Available commands:
 /help - Show this help message
 /setbusreminder - Set a bus reminder
 /list - List all bus reminders
+/buslist - Show bus stops for the selected bus (during setup)
 /deletereminder <number> - Delete a reminder by its number in /list output
 /cancel - Cancel the current reminder setup
     """

@@ -59,6 +59,8 @@ DynamoDB tables are created automatically at startup if permissions are availabl
 - `/help` – Show help menu
 - `/setbusreminder` – Create a new reminder
 - `/list` – List all reminders
+- `/buslist` – Show a paginated list of bus stops for the currently selected bus  
+  (Available during `/setbusreminder` to help users find the correct stop code)
 - `/deletereminder <number>` – Delete a reminder
 - `/cancel` – Cancel the current reminder setup
 

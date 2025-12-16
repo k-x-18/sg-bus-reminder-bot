@@ -413,6 +413,68 @@ def validate_bus_stop_input(bus_number: str, user_input: str):
         return match
 
 
+#====================================================================BUSLIST HELPERS============================================================
+
+def get_bus_stops_for_service(bus_number: str) -> list:
+    """
+    Get all unique bus stops for a bus service.
+    Returns a list of dicts with 'code' and 'name' keys, sorted by code.
+    Uses cached route data - no API calls.
+    """
+    routes = get_bus_routes(bus_number)
+    if not routes:
+        return []
+    
+    # Get unique stop codes from routes
+    stop_codes = set()
+    for route in routes:
+        stop_code = str(route.get("BusStopCode", ""))
+        if stop_code:
+            stop_codes.add(stop_code)
+    
+    # Build list of stops with names from cache
+    stops = []
+    for stop_code in sorted(stop_codes):
+        stop_info = all_bus_stops_cache.get(stop_code)
+        if stop_info:
+            stops.append({
+                "code": stop_code,
+                "name": stop_info["name"]
+            })
+    
+    return stops
+
+
+def format_bus_stops_page(bus_number: str, stops: list, page: int, per_page: int = 10) -> tuple:
+    """
+    Format a page of bus stops for display.
+    Returns (message_text, total_pages, current_page).
+    """
+    total_stops = len(stops)
+    if total_stops == 0:
+        return f"No bus stops found for Bus {bus_number}.", 0, 0
+    
+    total_pages = (total_stops + per_page - 1) // per_page  # Ceiling division
+    
+    # Wrap around page numbers
+    if page < 0:
+        page = total_pages - 1
+    elif page >= total_pages:
+        page = 0
+    
+    # Calculate slice indices
+    start_idx = page * per_page
+    end_idx = min(start_idx + per_page, total_stops)
+    page_stops = stops[start_idx:end_idx]
+    
+    # Format message
+    msg = f"Stops for Bus {bus_number} (Page {page + 1} / {total_pages})\n\n"
+    for stop in page_stops:
+        msg += f"{stop['code']} – {stop['name']}\n"
+    
+    return msg, total_pages, page
+
+
 #====================================================================BOT COMMANDS=======================================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
@@ -454,10 +516,101 @@ async def ask_bus_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ASK_BUS_NUMBER
 
     await update.message.reply_text(
-        "Please enter the 5 digit bus stop code or the stop name (e.g. Jurong East Int)"
+        "Please enter the 5 digit bus stop code or the stop name (e.g. Jurong East Int)\n\n"
+        "If you're unsure of the bus stop code, type /buslist to view stops for this bus."
     )
 
     return ASK_BUS_STOP
+
+async def handle_buslist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handle /buslist command - shows paginated list of bus stops for selected bus.
+    Only works after bus number is selected in /setbusreminder flow.
+    Returns ASK_BUS_STOP to continue the conversation flow.
+    """
+    bus_number = context.user_data.get("bus_number")
+    
+    if not bus_number:
+        await update.message.reply_text(
+            "Please start with /setbusreminder to select a bus service first."
+        )
+        return ConversationHandler.END
+    
+    # Get all stops for this bus
+    stops = get_bus_stops_for_service(bus_number)
+    
+    if not stops:
+        await update.message.reply_text(
+            f"No bus stops found for Bus {bus_number}."
+        )
+        return ASK_BUS_STOP
+    
+    # Initialize pagination state
+    context.user_data["buslist_page"] = 0
+    context.user_data["buslist_stops"] = stops
+    
+    # Format first page
+    msg, total_pages, current_page = format_bus_stops_page(bus_number, stops, 0)
+    
+    # Create pagination buttons
+    keyboard = []
+    if total_pages > 1:
+        keyboard.append([
+            InlineKeyboardButton("⬅ Prev", callback_data="buslist_prev"),
+            InlineKeyboardButton("➡ Next", callback_data="buslist_next")
+        ])
+    
+    await update.message.reply_text(
+        msg,
+        reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None
+    )
+    
+    # Return ASK_BUS_STOP to continue the conversation flow
+    return ASK_BUS_STOP
+
+
+async def handle_buslist_pagination(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handle pagination callbacks for /buslist (prev/next buttons).
+    """
+    query = update.callback_query
+    await query.answer()
+    
+    bus_number = context.user_data.get("bus_number")
+    stops = context.user_data.get("buslist_stops")
+    current_page = context.user_data.get("buslist_page", 0)
+    
+    if not bus_number or not stops:
+        await query.edit_message_text("Error: Bus list data not found. Please use /buslist again.")
+        return
+    
+    # Determine new page
+    if query.data == "buslist_prev":
+        new_page = current_page - 1
+    elif query.data == "buslist_next":
+        new_page = current_page + 1
+    else:
+        return
+    
+    # Format the new page (format_bus_stops_page handles wrap-around)
+    msg, total_pages, actual_page = format_bus_stops_page(bus_number, stops, new_page)
+    
+    # Update stored page
+    context.user_data["buslist_page"] = actual_page
+    
+    # Create pagination buttons
+    keyboard = []
+    if total_pages > 1:
+        keyboard.append([
+            InlineKeyboardButton("⬅ Prev", callback_data="buslist_prev"),
+            InlineKeyboardButton("➡ Next", callback_data="buslist_next")
+        ])
+    
+    await query.edit_message_text(
+        msg,
+        reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None
+    )
+
 
 async def validate_and_process_bus_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Validate bus stop input and proceed to next step."""
@@ -677,12 +830,19 @@ def main() -> None:
     job_queue = application.job_queue
     job_queue.run_repeating(check_reminders, interval=60, first=5)
     
+    # Register pagination callback handler BEFORE conversation handler
+    # This ensures buslist pagination buttons work correctly
+    application.add_handler(CallbackQueryHandler(handle_buslist_pagination, pattern="^buslist_(prev|next)$"))
+    
     # Conversation handler for setting bus reminder
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("setbusreminder", set_bus_reminder)],
         states={
             ASK_BUS_NUMBER: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_bus_stop)],
-            ASK_BUS_STOP: [MessageHandler(filters.TEXT & ~filters.COMMAND, validate_and_process_bus_stop)],
+            ASK_BUS_STOP: [
+                CommandHandler("buslist", handle_buslist_command),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, validate_and_process_bus_stop)
+            ],
             ASK_DAYS: [CallbackQueryHandler(ask_time)],
             ASK_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_reminder)],
         },
